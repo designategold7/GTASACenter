@@ -1,33 +1,67 @@
-The console is mission independant. You can change only global values with the console. However, if you are using any crack, or modded scm, please do not use the console. Most of the memory locations are different. Some functions might still work, but mainly, the console will either crash gta sa sooner or later, or completely damage your ongoing game.
+# GTASA Center
 
-Release 2.1.1 is for a minor fix on count-up timers freeze option of Release 2.1.0
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-New functionality in Version 2.1.0:
-This release works with all functionality with gta sa v1.0 and gta sa v1.01
-Option to freeze both count-up and count-down mission timers
-Option to lock the selected weather
-A complete weapon editor/spawner
-Nine new console commands for above functions
+A real-time memory editor for the PC version of Grand Theft Auto: San Andreas.
 
-New functionality in Version 2.0.0:
-The Admin Console is now called Control Center.
-Has Car Spawner functionality from Jacob.
-Works with v1.1 of GTA SA.
-Has more than 20 new functions, a readme and a help file.
+## Table of Contents
 
-New functionality in Version 1.8.2:
-You can now freeze and thaw game clock (for the stunt community), also using the console commands and the scroll bar
-Minor fix on the Player Specialities has been fixed. The Player Specs now gets 'locked' properly.
+- [About The Project](#about-the-project)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+- [Usage](#usage)
+- [Contributing](#contributing)
+- [License](#license)
 
-New functionality in Version 1.8.1:
-The weapon proficiencies are now handled and edited separately.
-The current car and player specs gets checked again after cut-scenes.
-The TANK MODE is back in the console, with an internal console command to set ON/OFF.
-The teleport locations are handled with 6 decimals after comma, making up to a few inches accuracy on teleporting.
-The tag locations are added to the location list.
-The ability to lock the cheats is also back in console, so the cheats like 'Never Wanted' does not get cleared after some cut-scenes.
-About 20 more console commands are also added to avoid the alt-tab out of the game to use the console.
-The girl-friend progresses does now work properly (after you set the pct to 100, you still need to date the GF once to get the 100 pct gift from the GF).
-You can now edit/change the game time freely without the gta sa loses the time/date syncronization (ie. the console now tracks the current date, weekday as well as current date and time).
-You can now freely edit the game speed and clock speed using the sliders and with new console commands.
-The teleport locations list gets sorted during save to config, so that the teleport to next and teleport to previous location console commands work now properly.
+## About The Project
+
+GTASA Center is a tool for modifying the PC version of Grand Theft Auto: San Andreas while the game is running. It functions as a memory editor, allowing for on-the-fly adjustments to various game parameters.
+
+The project is written in Visual Basic 6 and is designed to work with game versions 1.0 and 1.01.
+
+Core functionalities include:
+* Player Stat modification (health, money, etc.)
+* Vehicle Spawner
+* Weapon Editor and Spawner
+* In-game Time and Weather control
+* Teleportation system
+* Over 20 console commands for in-game use
+
+## Getting Started
+
+Follow these instructions to get the tool running.
+
+### Prerequisites
+
+* A compatible version of Microsoft Windows (XP or later).
+* Visual Basic 6 runtime libraries.
+* An installed copy of Grand Theft Auto: San Andreas (v1.0 or v1.01).
+
+### Installation
+
+1.  Download the latest compiled binary from the [Releases](https://github.com/designategold7/GTASACenter/releases) page.
+2.  Extract the archive's contents into a new folder.
+3.  Run `GTASAConsole.exe`, preferably with administrator privileges.
+
+## Usage
+
+1.  Launch Grand Theft Auto: San Andreas and load a save file.
+2.  Launch `GTASAConsole.exe`.
+3.  The tool's interface can now be used to modify the game in real-time.
+
+**Warning:** This tool directly manipulates game memory. It is intended for use with unmodified `gta-sa.exe` v1.0 or v1.01. Using it with cracked executables, script mods (SCM), or other game versions is not supported and will likely lead to game instability, crashes, or save file corruption. Use at your own risk.
+
+## Contributing
+
+Contributions to the project are welcome. Please follow the standard fork and pull request workflow.
+
+1.  Fork the Project
+2.  Create your Feature Branch (`git checkout -b feature/NewFeature`)
+3.  Commit your Changes (`git commit -m 'Add some NewFeature'`)
+4.  Push to the Branch (`git push origin feature/NewFeature`)
+5.  Open a Pull Request
+
+## License
+
+Distributed under the MIT License. See the `LICENSE` file for more information.
