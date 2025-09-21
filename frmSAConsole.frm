@@ -6364,3 +6364,1376 @@ errtmrConsole_Timer:
     End If
     Err.Clear
 End Sub
+Private Sub tmrHook_Timer() ' 'Hook GTASA / Check Hook status (1000 ms)
+On Error GoTo errtmrHook_Timer
+    Static iStatCtr As Long
+    Static sngWeaponProfTotal As Single
+    Static lngVehicleProfTotal As Long
+    Static intSpecShowBuffer As Integer
+    'Hook GTASA
+    'Find window handle:
+    lngHWnd = FindWindow(vbNullString, "GTA: San Andreas")
+    If (lngHWnd = 0) Then
+        lngLastGTASAHwnd = 0
+        isHasPlayer = False
+        'not injected, check and set captions and availability:
+        isInjected = False
+        isInternInjectCheck = True
+        If chkSpawnVehicle.Value <> vbUnchecked Then chkSpawnVehicle.Value = vbUnchecked
+        If chkSpawnVehicle.Caption <> "Spawner Code-Injection Status: (unknown)" Then chkSpawnVehicle.Caption = "Spawner Code-Injection Status: (unknown)"
+        If chkSpawnVehicle.Enabled Then chkSpawnVehicle.Enabled = False
+        If cmdSpawnCar(0).Enabled Then cmdSpawnCar(0).Enabled = False
+        isInternInjectCheck = False
+        strCarType = ""
+        tmrConsole.Enabled = False
+        tmrFindCar.Enabled = False
+        intWaitBeforeHook = 3
+        intRefreshFormValues = 1
+        isHasHandle = False
+        isHasPlayer = False
+        isGTASAiconic = True
+        lngLastPid = -1
+        If Me.Caption <> "GTASA Control Center" Then Me.Caption = "GTASA Control Center"
+        If Not isMsgShown And (iMsgShowCtr > 0) Then
+            iMsgShowCtr = iMsgShowCtr - 1
+            WritePrivateProfileString "Main", "InfoMsg", Format$(iMsgShowCtr), strIniFileName
+            isMsgShown = True
+            MsgBox "GTA SA is not running." & vbCrLf & _
+                   "Please start GTA SA, load/start a game," & vbCrLf & _
+                   "and then start the console" & vbCrLf & _
+                   "for proper syncronization!" & vbCrLf & _
+                   "This Message will be shown " & iMsgShowCtr & " more times.", vbInformation
+        End If
+        Exit Sub
+    ElseIf lngLastGTASAHwnd <> lngHWnd Then 'GTASA is just starting. Give some time:
+        lngLastGTASAHwnd = lngHWnd
+        isMsgShown = True
+        intRefreshFormValues = 1
+    End If
+    'Get Thread Process ID:
+    GetWindowThreadProcessId lngHWnd, lngPid
+    If CLng(lngPid) <> CLng(lngLastPid) Then
+        isGTASAiconic = True
+        If lngPHandle <> 0 Then CloseHandle lngPHandle
+        lngLastPid = lngPid
+        'Open process:
+        lngPHandle = OpenProcess(PROCESS_ALL_ACCESS, False, lngPid)
+        If (lngPHandle = 0) Then
+            If isHasHandle Then
+                tmrConsole.Enabled = False
+                tmrFindCar.Enabled = False
+                If Me.Caption <> "GTASA Control Center" Then Me.Caption = "GTASA Control Center"
+            End If
+            isHasHandle = False
+            intWaitBeforeHook = 5
+            intRefreshFormValues = 1
+            isHasPlayer = False
+            Exit Sub
+        Else
+            isHasHandle = True
+            tmrFindCar.Enabled = True
+        End If
+    End If
+    
+    'Set isGTASAiconic or not according to TOPMOST window:
+    GetWindowPlacement lngHWnd, gtaSAWindow
+    isGTASAiconic = (gtaSAWindow.showCmd = 2) '2:NotShowing(minimized) / 1:Showing
+    'Player Information:
+    lngHookBuffer = GetMemLong(GTASABaseAdr.PlayerAdr)
+    If lngHookBuffer <> 0 Then
+        'We have a player
+        isHasPlayer = True
+        If GTASAPlayerAddresse.lngObjectStart <> lngHookBuffer Then
+            'We have a new player:
+            GTASAPlayerAddresse.lngObjectStart = lngHookBuffer
+            GTASAPlayerAddresse.lngPositionPtr = lngHookBuffer + 20
+            GTASAPlayerAddresse.lngSpecialsAdr = lngHookBuffer + 66 'byte, bit coded for BPDPEPFP
+            GTASAPlayerAddresse.lngPedSpeedAdr = lngHookBuffer + 68
+            GTASAPlayerAddresse.lngHealthAdr = lngHookBuffer + 1344
+            GTASAPlayerAddresse.lngMaxHealthAdr = lngHookBuffer + 1348
+            GTASAPlayerAddresse.lngArmorAdr = lngHookBuffer + 1352
+            GTASAPlayerAddresse.lngLastCarAdr = lngHookBuffer + 1420
+            GTASAPlayerAddresse.lngBrassKnucklesAdr = lngHookBuffer + 1440
+            For iStatCtr = 0 To 10
+                GTASAPlayerAddresse.lngWeaponsAdr(iStatCtr) = lngHookBuffer + 1468 + (iStatCtr * 28)
+            Next iStatCtr
+            GTASAPlayerAddresse.lngDetonatorAdr = lngHookBuffer + 1776
+            GTASAPlayerAddresse.lngWeaponSlotAdr = lngHookBuffer + 1816
+            GTASAPlayerAddresse.lngWeaponIDAdr = lngHookBuffer + 1856
+        End If
+        'read the [new] position data:
+        lngHookBuffer = GetMemLong(GTASAPlayerAddresse.lngPositionPtr)
+        If lngHookBuffer <> 0 Then
+            GTASAPlayerAddresse.lngPlayerPosAdr = lngHookBuffer
+            GTASAPlayerAddresse.lngXposAdr = lngHookBuffer + 48
+            GTASAPlayerAddresse.lngYposAdr = lngHookBuffer + 52
+            GTASAPlayerAddresse.lngZposAdr = lngHookBuffer + 56
+        End If
+        If isAutoInject And Not isInjected Then
+            If CheckIfInjectable Then
+                'inject code:
+                WriteProcessMemory lngPHandle, GTASABaseAdr.CodeInjectCodeAdr, bInjectedCode(0), 504&, 504&
+                WriteProcessMemory lngPHandle, GTASABaseAdr.CodeInjectJumpAdr, bInjectedJump(0), 5&, 5&
+                chkSpawnVehicle.Caption = "Spawner Code-Injection Status: Injected"
+                cmdSpawnCar(0).Enabled = True
+                isInjected = True
+            End If
+        End If
+    Else
+        'Either GTA is not running anymore, or no Game is running.
+        isHasPlayer = False
+        If Me.Caption <> "GTASA Control Center [Online - No Game in Progress]" Then Me.Caption = "GTASA Control Center [Online - No Game in Progress]"
+        Exit Sub
+    End If
+    'Enable Console Timer:
+    If isGTASAiconic Then
+        tmrConsole.Enabled = False 'Don't listen to keystrokes if GTASA is minimized
+    Else
+        tmrConsole.Enabled = True 'Listen to keystrokes if GTASA is showing
+    End If
+    'Read Values from GTASA to refresh non-locked items:
+    If Not isGTASAiconic Then
+        intRefreshFormValues = 1
+        'by Every timer event, check Car Leveling:
+        If isFlightAssistance And tCurrCarAdr.isUsable Then
+            'Stop Spin:
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarSpinAdr, zeroSpin, 12&, 12&
+            'Level Z Grad:
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 8, 0&, 4&, 4&
+            'Level Z Looking:
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 24, 0&, 4&, 4&
+            'Level X/Y/Z Relational Positioning
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 32, 0&, 4&, 4&
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 36, 0&, 4&, 4&
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 40, 1&, 4&, 4&
+        End If
+        'Refresh Garages (needed for proper reparking):
+        CheckAndRefreshGarages
+    Else
+        'GTASA minimized, so refresh form values:
+        'Set Internal Click OFF:
+        If intGameTimeChangeCount > 0 Then intGameTimeChangeCount = 0
+        If intRefreshFormValues < 0 Then Exit Sub 'do not refresh more than 3 times
+        isInjected = CheckIfInjected
+        isInternInjectCheck = True
+        If isInjected Then
+            'already injected, check and set captions and availability:
+            If chkSpawnVehicle.Value <> vbChecked Then chkSpawnVehicle.Value = vbChecked
+            If chkSpawnVehicle.Caption <> "Spawner Code-Injection Status: Injected" Then chkSpawnVehicle.Caption = "Spawner Code-Injection Status: Injected"
+            If Not chkSpawnVehicle.Enabled Then chkSpawnVehicle.Enabled = True
+            If Not cmdSpawnCar(0).Enabled Then cmdSpawnCar(0).Enabled = True
+        ElseIf Not CheckIfInjectable Then
+            'not injectable, check and set captions and availability:
+            If chkSpawnVehicle.Value <> vbUnchecked Then chkSpawnVehicle.Value = vbUnchecked
+            If chkSpawnVehicle.Caption <> "Spawner Code-Injection Status: Not Injectable" Then chkSpawnVehicle.Caption = "Spawner Code-Injection Status: Not Injectable"
+            If chkSpawnVehicle.Enabled Then chkSpawnVehicle.Enabled = False
+            If cmdSpawnCar(0).Enabled Then cmdSpawnCar(0).Enabled = False
+        Else
+            'not injected, check and set captions and availability:
+            If chkSpawnVehicle.Value <> vbUnchecked Then chkSpawnVehicle.Value = vbUnchecked
+            If chkSpawnVehicle.Caption <> "Spawner Code-Injection Status: Not Injected" Then chkSpawnVehicle.Caption = "Spawner Code-Injection Status: Not Injected"
+            If Not chkSpawnVehicle.Enabled Then chkSpawnVehicle.Enabled = True
+            If cmdSpawnCar(0).Enabled Then cmdSpawnCar(0).Enabled = False
+        End If
+        isInternInjectCheck = False
+        If Not isHasPlayer Then Exit Sub
+        intRefreshFormValues = intRefreshFormValues - 1
+        isInternalClick = False
+        isTimerClick = True
+        'Form Caption:
+        'check if player is in car or not, if in new car, set cat status as desired:
+        CheckPlayerCarStatus
+        'read parked car information from game:
+        Call cmdGarages_Click(0)
+        'Player Tracking:
+        sngWeaponProfTotal = 0
+        For iStatCtr = 0 To 9
+            sngWeaponProfTotal = sngWeaponProfTotal + GetMemFloat(GTASABaseAdr.WeaponProfStatAdr(iStatCtr))
+        Next iStatCtr
+        lblConsole(57).Caption = "Average Weapon Proficiency: " & Format(sngWeaponProfTotal / 100, "#0") & " %"
+        'set internal click ON:
+        isInternalClick = True
+        If Not isLockArmor Then oPedStats(0).ScrollVal = GetMemFloat(GTASAPlayerAddresse.lngArmorAdr)       'Read Armor
+        If Not isLockHealth Then oPedStats(1).ScrollVal = GetMemFloat(GTASAPlayerAddresse.lngHealthAdr)     'Read Health
+        If Not isLockFat Then oPedStats(2).ScrollVal = GetMemFloat(GTASABaseAdr.FatStatAdr)                 'Read Fat
+        If Not isLockStamina Then oPedStats(3).ScrollVal = GetMemFloat(GTASABaseAdr.StaminaStatAdr)         'Read Stamina
+        If Not isLockMuscle Then oPedStats(4).ScrollVal = GetMemFloat(GTASABaseAdr.MuscleStatAdr)           'Read Muscle
+        If Not isLockLungStat Then oPedStats(5).ScrollVal = GetMemLong(GTASABaseAdr.LungCapacityAdr)        'Read Lung
+        If Not isLockGamblingStat Then oPedStats(6).ScrollVal = GetMemFloat(GTASABaseAdr.GamblingStatAdr)   'Read Gambling
+        If Not isLockDrivingProf Then oPedStats(7).ScrollVal = GetMemLong(GTASABaseAdr.VehicleProfAdr(0))   'Read Driving Proficiency
+        If Not isLockBikingProf Then oPedStats(8).ScrollVal = GetMemLong(GTASABaseAdr.VehicleProfAdr(1))    'Read Biking Proficiency
+        If Not isLockCyclingProf Then oPedStats(9).ScrollVal = GetMemLong(GTASABaseAdr.VehicleProfAdr(2))   'Read Cycling Proficiency
+        If Not isLockPilotProf Then oPedStats(10).ScrollVal = GetMemLong(GTASABaseAdr.VehicleProfAdr(3))    'Read Pilot Proficiency
+        'Weapons:
+        If Not isFixBrassKnuckle Then chkWeapons(11).Value = IIf(GetMemLong(GTASAPlayerAddresse.lngBrassKnucklesAdr) = 1, vbChecked, vbUnchecked)
+        For iStatCtr = 0 To 10
+            If Not isFixWeaponSlots(iStatCtr) Then
+                ReadProcessMemory lngPHandle, GTASAPlayerAddresse.lngWeaponsAdr(iStatCtr), HookPlayerWeapon, 16&, 0&
+                If HookPlayerWeapon.lngTotalAmmo = 0 And HookPlayerWeapon.lngWeaponID <> 9 Then
+                    cboWeapons(iStatCtr).ListIndex = 0 'no ammo, no weapon
+                    iFixWeaponID(iStatCtr) = 0
+                ElseIf HookPlayerWeapon.lngWeaponID > 46 Then
+                    cboWeapons(iStatCtr).ListIndex = 0 'unknown weapon
+                    iFixWeaponID(iStatCtr) = 0
+                Else
+                    cboWeapons(iStatCtr).ListIndex = WeaponSlotCombo(HookPlayerWeapon.lngWeaponID, 1)
+                    iFixWeaponID(iStatCtr) = HookPlayerWeapon.lngWeaponID
+                End If
+                txtAmmo(iStatCtr).Text = HookPlayerWeapon.lngTotalAmmo
+                iFixWeaponAmmo(iStatCtr) = HookPlayerWeapon.lngTotalAmmo
+                cboWeapons(iStatCtr).BackColor = &HFFFFFF
+                txtAmmo(iStatCtr).BackColor = &HFFFFFF
+            End If
+        Next iStatCtr
+        'Weather:
+        If Not isWeatherLock Then
+            lngHookBuffer = GetMemLong(GTASABaseAdr.WeatherCurrentAdr)
+            If lngHookBuffer > -1 And lngHookBuffer < 46 Then cboWeather.ListIndex = lngHookBuffer
+        End If
+        'Girlfriends:
+        bytHookBuffer = GetMemByte(GTASABaseAdr.HotCoffeeAdr)
+        If bytHookBuffer = 1 Then
+            chkCoffee.Value = vbUnchecked
+            chkCoffee.Caption = "Coffee: Censored"
+            chkCoffee.Enabled = True
+        ElseIf bytHookBuffer = 0 Then
+            chkCoffee.Value = vbChecked
+            chkCoffee.Caption = "Coffee: Uncensored"
+            chkCoffee.Enabled = True
+        Else
+            chkCoffee.Value = vbUnchecked
+            chkCoffee.Caption = "SCM Modded..."
+            chkCoffee.Enabled = False
+        End If
+        For iStatCtr = 0 To 5
+            oGFStats(iStatCtr).ScrollVal = GetMemLong(GTASABaseAdr.GFStatAdr(iStatCtr))
+        Next iStatCtr
+        'Cheats:
+        For iStatCtr = 0 To 19
+            If oCheatStates(iStatCtr).CheatLock = vbUnchecked Then
+                oCheatStates(iStatCtr).CheatState = IIf(GetMemByte(GTASABaseAdr.cCheatsAdr(iStatCtr)) = 1, vbChecked, vbUnchecked)
+            End If
+        Next iStatCtr
+        'code-inject cheats:
+        If oCheatStates(20).CheatLock = vbUnchecked Then
+            'check the mem status:
+            ReadProcessMemory lngPHandle, GTASABaseAdr.CodeInjectJump_OneHitKillAdr, bInjectCheck_OneHitKill(0), 5&, 0&
+            If ((bInjectCheck_OneHitKill(0) = bInjectedJump_OneHitKill(0)) And (bInjectCheck_OneHitKill(1) = bInjectedJump_OneHitKill(1)) And _
+                (bInjectCheck_OneHitKill(2) = bInjectedJump_OneHitKill(2)) And (bInjectCheck_OneHitKill(3) = bInjectedJump_OneHitKill(3)) And _
+                (bInjectCheck_OneHitKill(4) = bInjectedJump_OneHitKill(4))) Then
+                'jump code is injected!!
+                oCheatStates(21).CheatState = vbChecked
+            Else
+                oCheatStates(21).CheatState = vbUnchecked
+            End If
+        End If
+        If oCheatStates(21).CheatLock = vbUnchecked Then
+            oCheatStates(21).CheatState = IIf(GetMemInt(GTASABaseAdr.CodeInjectNOP_FreezeTimerUpAdr) = &H9090, vbChecked, vbUnchecked)
+        End If
+        'Ped Speed:
+        lngReadReturn = ReadProcessMemory(lngPHandle, GTASAPlayerAddresse.lngPedSpeedAdr, speedHookBuffer, 12&, 0&)
+        If lngReadReturn <> 0 Then
+            If speedHookBuffer.sngXSpeed > 4 Then speedHookBuffer.sngXSpeed = 4
+            If speedHookBuffer.sngXSpeed < -4 Then speedHookBuffer.sngXSpeed = -4
+            scrPedSpeed(0).Value = speedHookBuffer.sngXSpeed * 500 'X Speed
+            If speedHookBuffer.sngYSpeed > 4 Then speedHookBuffer.sngYSpeed = 4
+            If speedHookBuffer.sngYSpeed < -4 Then speedHookBuffer.sngYSpeed = -4
+            scrPedSpeed(1).Value = speedHookBuffer.sngYSpeed * 500  'Y Speed
+            If speedHookBuffer.sngZSpeed > 4 Then speedHookBuffer.sngZSpeed = 4
+            If speedHookBuffer.sngZSpeed < -4 Then speedHookBuffer.sngZSpeed = -4
+            scrPedSpeed(2).Value = speedHookBuffer.sngZSpeed * 500  'Z Speed
+        End If
+        'assign current X/Y/Z Speed and spin to captions:
+        lblPedSpeed(0).Caption = "X Speed (" & scrPedSpeed(0).Value / 10 & "%)"
+        lblPedSpeed(1).Caption = "Y Speed (" & scrPedSpeed(1).Value / 10 & "%)"
+        lblPedSpeed(2).Caption = "Z Speed (" & scrPedSpeed(2).Value / 10 & "%)"
+        'Read Ped Specialities to show:
+        intSpecShowBuffer = GetMemInt(GTASAPlayerAddresse.lngSpecialsAdr)
+        lblCurrentPlayer.Caption = "Current Player: " & IIf((intSpecShowBuffer And 128&) = 128&, "EP", "")
+        lblCurrentPlayer.Caption = lblCurrentPlayer.Caption & IIf((intSpecShowBuffer And 64&) = 64&, "+DP", "")
+        lblCurrentPlayer.Caption = lblCurrentPlayer.Caption & IIf((intSpecShowBuffer And 4&) = 4&, "+BP", "")
+        lblCurrentPlayer.Caption = lblCurrentPlayer.Caption & IIf((intSpecShowBuffer And 8&) = 8&, "+FP", "")
+        If lblCurrentPlayer.Caption = "Current Player: " Then lblCurrentPlayer.Caption = "Current Player: No Specialities"
+        'Car Tracking:
+        If isHasCar Then 'Read Car Details:
+            intSpecShowBuffer = GetMemInt(tCurrCarAdr.lngSpecialsAdr)
+            lblCurrentCar.Caption = "Current Car: " & IIf((intSpecShowBuffer And 128&) = 128&, "EP", "")
+            lblCurrentCar.Caption = lblCurrentCar.Caption & IIf((intSpecShowBuffer And 16&) = 16&, "+DP", "")
+            lblCurrentCar.Caption = lblCurrentCar.Caption & IIf((intSpecShowBuffer And 4&) = 4&, "+BP", "")
+            lblCurrentCar.Caption = lblCurrentCar.Caption & IIf((intSpecShowBuffer And 8&) = 8&, "+FP", "")
+            If lblCurrentCar.Caption = "Current Car: " Then lblCurrentCar.Caption = "Current Car: No Specialities"
+            If chkCarDynamics(1).Value = 0 Then 'Read Car Doors:
+                bytHookBuffer = GetMemByte(tCurrCarAdr.lngCarDoorAdr)
+                optCarDoors(1).Value = (CInt((bytHookBuffer And 2)) = 2)
+                optCarDoors(0).Value = Not optCarDoors(1).Value
+            End If
+            If chkCarDynamics(3).Value = 0 Then 'Read Engine Damage:
+                sngHookBuffer = GetMemFloat(tCurrCarAdr.lngCarDamageAdr)
+                If (sngHookBuffer >= 0) And (sngHookBuffer <= 4000) Then scrCarDynamics(0).Value = CInt(sngHookBuffer)
+                chkCarDynamics(3).Caption = "Engine health (" & scrCarDynamics(0).Value \ 10 & "%):"
+            End If
+            If chkCarDynamics(4).Value = 0 Then 'Read Car Weight:
+                sngHookBuffer = GetMemFloat(tCurrCarAdr.lngCarWeightAdr)
+                If (sngHookBuffer >= 100) And (sngHookBuffer <= 400000) Then
+                    scrCarDynamics(1).Value = sngHookBuffer / 100
+                    chkCarDynamics(4).Caption = "Car Weight: (" & Format$(scrCarDynamics(1).Value / 10, "0.0") & " Tons)"
+                End If
+            End If
+            If chkMajorLock.Value = 0 Then
+                bytHookBuffer = GetMemByte(tCurrCarAdr.lngCarColorAdr)
+                picMajor.BackColor = GTASAColors(bytHookBuffer).lngRGB
+                picMajor.Tag = bytHookBuffer
+            End If
+            If chkMinorLock.Value = 0 Then
+                bytHookBuffer = GetMemByte(tCurrCarAdr.lngCarColorAdr + 1)
+                picMinor.BackColor = GTASAColors(bytHookBuffer).lngRGB
+                picMinor.Tag = bytHookBuffer
+            End If
+            lngReadReturn = ReadProcessMemory(lngPHandle, tCurrCarAdr.lngCarSpeedAdr, speedHookBuffer, 12&, 0&)
+            If lngReadReturn <> 0 Then
+                If speedHookBuffer.sngXSpeed > 4 Then speedHookBuffer.sngXSpeed = 4
+                If speedHookBuffer.sngXSpeed < -4 Then speedHookBuffer.sngXSpeed = -4
+                scrCarDynamics(2).Value = speedHookBuffer.sngXSpeed * 500
+                If speedHookBuffer.sngYSpeed > 4 Then speedHookBuffer.sngYSpeed = 4
+                If speedHookBuffer.sngYSpeed < -4 Then speedHookBuffer.sngYSpeed = -4
+                scrCarDynamics(3).Value = speedHookBuffer.sngYSpeed * 500
+                If speedHookBuffer.sngZSpeed > 4 Then speedHookBuffer.sngZSpeed = 4
+                If speedHookBuffer.sngZSpeed < -4 Then speedHookBuffer.sngZSpeed = -4
+                scrCarDynamics(4).Value = speedHookBuffer.sngZSpeed * 500
+            End If
+            lngReadReturn = ReadProcessMemory(lngPHandle, tCurrCarAdr.lngCarSpinAdr, spinHookBuffer, 12&, 0&)
+            If lngReadReturn <> 0 Then
+                If spinHookBuffer.sngXSpin > 4 Then spinHookBuffer.sngXSpin = 4
+                If spinHookBuffer.sngXSpin < -4 Then spinHookBuffer.sngXSpin = -4
+                scrCarDynamics(5).Value = spinHookBuffer.sngXSpin * 500
+                If spinHookBuffer.sngYSpin > 4 Then spinHookBuffer.sngYSpin = 4
+                If spinHookBuffer.sngYSpin < -4 Then spinHookBuffer.sngYSpin = -4
+                scrCarDynamics(6).Value = spinHookBuffer.sngYSpin * 500
+                If spinHookBuffer.sngZSpin > 4 Then spinHookBuffer.sngZSpin = 4
+                If spinHookBuffer.sngZSpin < -4 Then spinHookBuffer.sngZSpin = -4
+                scrCarDynamics(7).Value = spinHookBuffer.sngZSpin * 500
+            End If
+            lblConsole(15).Caption = "X Speed (" & scrCarDynamics(2).Value / 10 & "%)"
+            lblConsole(16).Caption = "Y Speed (" & scrCarDynamics(3).Value / 10 & "%)"
+            lblConsole(17).Caption = "Z Speed (" & scrCarDynamics(4).Value / 10 & "%)"
+            lblConsole(18).Caption = "X Spin (" & scrCarDynamics(5).Value / 10 & "%)"
+            lblConsole(19).Caption = "Y Spin (" & scrCarDynamics(6).Value / 10 & "%)"
+            lblConsole(20).Caption = "Z Spin (" & scrCarDynamics(7).Value / 10 & "%)"
+            If (chkCarDynamics(10).Value = 0) And isHasCar Then
+                txtLicensePlate.Text = GetMemString(tCurrCarAdr.lngLicensePlateAdr, 8)
+            End If
+        End If
+        CheckAndRefreshGarages
+        cPlayerLoc.Left = ((sZoomLevel * (GetMemFloat(GTASAPlayerAddresse.lngXposAdr) + 3000&)) / sngPixToGTA) - (iLocBoxSize / 2)
+        cPlayerLoc.Top = ((sZoomLevel * (3000& - GetMemFloat(GTASAPlayerAddresse.lngYposAdr))) / sngPixToGTA) - (iLocBoxSize / 2)
+        cPlayerLoc.Visible = True
+        dtGameDateTime = DateSerial(1991, 5, 1 + GetMemInt(GTASABaseAdr.DaysInGameAdr)) + TimeSerial(GetMemByte(GTASABaseAdr.CurrHourAdr), GetMemByte(GTASABaseAdr.CurrMinuteAdr), 0)
+        lblConsole(30).Caption = "Game Time: " & Format(dtGameDateTime, "HH:nn") & " / Wd: " & sWeekdays(CInt(Format(dtGameDateTime, "w", vbSunday))) & " / Day: " & GetMemLong(GTASABaseAdr.DaysInGameAdr)
+        lngHookBuffer = GetMemLong(GTASABaseAdr.GameSpeedMsAdr)
+        If (lngHookBuffer > 99) And (lngHookBuffer < 1000) Then
+            scrGameSpeed(0).Value = CLng(((100000 / lngHookBuffer) - 100&) / 10&)
+            lblConsole(58).Caption = "Clock Speed : " & (100 + (scrGameSpeed(0).Value * 10)) & " %"
+        ElseIf lngHookBuffer = 60000 Then
+            scrGameSpeed(0).Value = -91
+            lblConsole(58).Caption = "Clock Speed : Real-time"
+        ElseIf lngHookBuffer = 3600000 Then
+            scrGameSpeed(0).Value = -92
+            lblConsole(58).Caption = "Clock Speed : Stopped"
+        ElseIf lngHookBuffer < 10001 Then
+            scrGameSpeed(0).Value = CLng((100000 / lngHookBuffer) - 100&)
+            lblConsole(58).Caption = "Clock Speed : " & (100 + scrGameSpeed(0).Value) & " %"
+        End If
+        lngHookBuffer = CLng(GetMemFloat(GTASABaseAdr.GameSpeedPctAdr) * 1000)
+        If (lngHookBuffer > 99) And (lngHookBuffer < 1000) Then
+            scrGameSpeed(1).Value = CLng(lngHookBuffer / 10) - 100
+            lblConsole(61).Caption = "Game Speed : " & (100 + scrGameSpeed(1).Value) & " %"
+        ElseIf lngHookBuffer < 10001 Then
+            scrGameSpeed(1).Value = CLng(lngHookBuffer / 100) - 10
+            lblConsole(61).Caption = "Game Speed : " & (100 + (scrGameSpeed(1).Value * 10)) & " %"
+        End If
+        isInternalClick = False
+        isTimerClick = False
+    End If
+Exit Sub
+TerminateAll:
+    CollectGarbage False
+errtmrHook_Timer:
+    If isGTASAiconic Then
+        MsgBox Err.Description, , "Hook Timer"
+    End If
+    Err.Clear
+    isInternalClick = False
+    isTimerClick = False
+End Sub
+Private Sub tmrFindCar_Timer() ' 'Find Car, 5xConsoleTimer=500ms
+On Error GoTo errtmrFindCar_Timer
+    If GetMemLong(GTASABaseAdr.PlayerAdr) = 0 Then 'Exit if no player
+        If Me.Caption <> "GTASA Control Center [Online - No Game in Progress]" Then Me.Caption = "GTASA Control Center [Online - No Game in Progress]"
+        Exit Sub
+    End If
+    'check if player is in car or not, if new car, set car status as desired:
+    CheckPlayerCarStatus
+Exit Sub
+errtmrFindCar_Timer:
+    If isGTASAiconic Then
+        MsgBox Err.Description, , "Find Car Timer"
+    End If
+    Err.Clear
+End Sub
+
+Private Sub tmrConsole_Timer() 'CheckThis 'Main Loop Timer / 10-1000ms
+On Error GoTo errtmrConsole_Timer
+    Static iStatCtr As Integer
+'Lock, as needed the Player properties:
+    If isGTASAiconic Or (Not ReFillPlayerAdr) Then Exit Sub
+    'Exit if in Menu Mode (doublecheck)
+    'read the player information:
+    If isLockHealth Then
+        If GetMemFloat(GTASAPlayerAddresse.lngHealthAdr) < sngLockHealthTo Then
+            SetMemFloat GTASAPlayerAddresse.lngMaxHealthAdr, sngLockHealthTo
+            SetMemFloat GTASAPlayerAddresse.lngHealthAdr, sngLockHealthTo
+            SetMemFloat GTASABaseAdr.MaxHealthStatAdr, 1000
+        End If
+    End If
+    If isLockArmor Then
+        If CLng(GetMemFloat(GTASAPlayerAddresse.lngArmorAdr)) <> CLng(sngLockArmorTo) Then SetMemFloat GTASAPlayerAddresse.lngArmorAdr, sngLockArmorTo
+    End If
+    If isLockFat Then
+        If CLng(GetMemFloat(GTASABaseAdr.FatStatAdr)) <> CLng(sngLockFatTo) Then SetMemFloat GTASABaseAdr.FatStatAdr, sngLockFatTo
+    End If
+    If isLockStamina Then
+        If CLng(GetMemFloat(GTASABaseAdr.StaminaStatAdr)) <> CLng(sngLockStaminaTo) Then SetMemFloat GTASABaseAdr.StaminaStatAdr, sngLockStaminaTo
+    End If
+    If isLockMuscle Then
+        If CLng(GetMemFloat(GTASABaseAdr.MuscleStatAdr)) <> CLng(sngLockMuscleTo) Then SetMemFloat GTASABaseAdr.MuscleStatAdr, sngLockMuscleTo
+    End If
+    If isLockDrivingProf Then '0
+        If GetMemLong(GTASABaseAdr.VehicleProfAdr(0)) <> lngLockDrivingProfTo Then SetMemLong GTASABaseAdr.VehicleProfAdr(0), lngLockDrivingProfTo
+    End If
+    If isLockBikingProf Then '1
+        If GetMemLong(GTASABaseAdr.VehicleProfAdr(1)) <> lngLockBikingProfTo Then SetMemLong GTASABaseAdr.VehicleProfAdr(1), lngLockBikingProfTo
+    End If
+    If isLockCyclingProf Then '2
+        If GetMemLong(GTASABaseAdr.VehicleProfAdr(2)) <> lngLockCyclingProfTo Then SetMemLong GTASABaseAdr.VehicleProfAdr(2), lngLockCyclingProfTo
+    End If
+    If isLockPilotProf Then '3
+        If GetMemLong(GTASABaseAdr.VehicleProfAdr(3)) <> lngLockPilotProfTo Then SetMemLong GTASABaseAdr.VehicleProfAdr(3), lngLockPilotProfTo
+    End If
+    If isLockLungStat Then
+        If GetMemLong(GTASABaseAdr.LungCapacityAdr) <> lngLockLungStatTo Then SetMemLong GTASABaseAdr.LungCapacityAdr, lngLockLungStatTo
+    End If
+    If isLockGamblingStat Then
+        If CLng(GTASABaseAdr.GamblingStatAdr) <> CLng(sngLockGamblingStatTo) Then SetMemFloat GTASABaseAdr.GamblingStatAdr, sngLockGamblingStatTo
+    End If
+    If isFixPed Then
+        SetBitOnInteger GTASAPlayerAddresse.lngSpecialsAdr, 7, (chkPedSpecs(0).Value = vbChecked)
+        SetBitOnInteger GTASAPlayerAddresse.lngSpecialsAdr, 6, (chkPedSpecs(1).Value = vbChecked)
+        SetBitOnInteger GTASAPlayerAddresse.lngSpecialsAdr, 2, (chkPedSpecs(2).Value = vbChecked)
+        SetBitOnInteger GTASAPlayerAddresse.lngSpecialsAdr, 3, (chkPedSpecs(3).Value = vbChecked)
+    End If
+    For iStatCtr = 0 To 5
+        If isLockGF(iStatCtr) Then
+            If GetMemLong(GTASABaseAdr.GFStatAdr(iStatCtr)) <> lngLockGFto(iStatCtr) Then
+                SetMemLong GTASABaseAdr.GFStatAdr(iStatCtr), lngLockGFto(iStatCtr)     'Denise/Michelle/Helena/Katie/Barbara/Millie
+                If isOrgSCM Then SetMemLong GTASABaseAdr.GFProgressAdr(iStatCtr), lngLockGFto(iStatCtr) 'Denise/Michelle/Helena/Katie/Barbara/Millie
+            End If
+        End If
+    Next iStatCtr
+    'cheats status:
+    For iStatCtr = 0 To 19
+        If oCheatStates(iStatCtr).CheatLock = vbChecked Then
+            If GetMemByte(GTASABaseAdr.cCheatsAdr(iStatCtr)) <> oCheatStates(iStatCtr).CheatState Then 
+			GTASABaseAdr.cCheatsAdr(iStatCtr), oCheatStates(iStatCtr).CheatState
+        End If
+    Next iStatCtr
+    'injectable cheats status:
+    If oCheatStates(20).CheatLock = vbChecked Then
+        'check the mem status:
+        ReadProcessMemory lngPHandle, GTASABaseAdr.CodeInjectJump_OneHitKillAdr, bInjectCheck_OneHitKill(0), 5&, 0&
+        If oCheatStates(20).CheatState = vbChecked Then
+            'inject if injectable:
+            If ((bInjectCheck_OneHitKill(0) = bInjectedJump_OneHitKill(0)) And (bInjectCheck_OneHitKill(1) = bInjectedJump_OneHitKill(1)) And _
+                (bInjectCheck_OneHitKill(2) = bInjectedJump_OneHitKill(2)) And (bInjectCheck_OneHitKill(3) = bInjectedJump_OneHitKill(3)) And _
+                (bInjectCheck_OneHitKill(4) = bInjectedJump_OneHitKill(4))) Then
+                'jump code is already injected!!
+            ElseIf ((bInjectCheck_OneHitKill(0) = bNotInjectedJump_OneHitKill(0)) And (bInjectCheck_OneHitKill(1) = bNotInjectedJump_OneHitKill(1)) And _
+                   (bInjectCheck_OneHitKill(2) = bNotInjectedJump_OneHitKill(2)) And (bInjectCheck_OneHitKill(3) = bNotInjectedJump_OneHitKill(3)) And _
+                   (bInjectCheck_OneHitKill(4) = bNotInjectedJump_OneHitKill(4))) Then
+                'jump code is injectable:
+                WriteProcessMemory lngPHandle, GTASABaseAdr.CodeInjectCode_OneHitKillAdr, bInjectedCode_OneHitKill(0), 47&, 47&
+                WriteProcessMemory lngPHandle, GTASABaseAdr.CodeInjectJump_OneHitKillAdr, bInjectedJump_OneHitKill(0), 5&, 5&
+            End If
+        Else
+            'remove injection:
+            If ((bInjectCheck_OneHitKill(0) = bInjectedJump_OneHitKill(0)) And (bInjectCheck_OneHitKill(1) = bInjectedJump_OneHitKill(1)) And _
+                (bInjectCheck_OneHitKill(2) = bInjectedJump_OneHitKill(2)) And (bInjectCheck_OneHitKill(3) = bInjectedJump_OneHitKill(3)) And _
+                (bInjectCheck_OneHitKill(4) = bInjectedJump_OneHitKill(4))) Then
+                'jump code is injected, remove injection:
+                WriteProcessMemory lngPHandle, GTASABaseAdr.CodeInjectJump_OneHitKillAdr, bNotInjectedJump_OneHitKill(0), 5&, 5&
+            End If
+        End If
+    End If
+    If oCheatStates(21).CheatLock = vbChecked Then
+        If oCheatStates(21).CheatState = vbChecked Then
+            'inject if injectable:
+            If GetMemInt(GTASABaseAdr.CodeInjectNOP_FreezeTimerUpAdr) = iOrg_FreezeTimerUp Then
+                SetMemInt GTASABaseAdr.CodeInjectNOP_FreezeTimerUpAdr, &H9090
+                If GetMemInt(GTASABaseAdr.CodeInjectNOP_FreezeTimerDownAdr) = iOrg_FreezeTimerDown Then SetMemInt GTASABaseAdr.CodeInjectNOP_FreezeTimerDownAdr, &H9090
+            End If
+        Else
+            'remove injection if it was injected/injectable:
+            If GetMemInt(GTASABaseAdr.CodeInjectNOP_FreezeTimerUpAdr) = &H9090 Then
+                SetMemInt GTASABaseAdr.CodeInjectNOP_FreezeTimerUpAdr, iOrg_FreezeTimerUp
+                If GetMemInt(GTASABaseAdr.CodeInjectNOP_FreezeTimerDownAdr) = &H9090 Then SetMemInt GTASABaseAdr.CodeInjectNOP_FreezeTimerDownAdr, iOrg_FreezeTimerDown
+            End If
+        End If
+    End If
+    If isRestartCar And tCurrCarAdr.isUsable Then 'restart car if needed
+        If (GetMemByte(tCurrCarAdr.lngStalledAdr) And &H10) = 0 Then SetMemByte tCurrCarAdr.lngStalledAdr, GetMemByte(tCurrCarAdr.lngStalledAdr) Or &H10
+    End If
+    'weapons:
+    If isFixBrassKnuckle Then
+        If GetMemLong(GTASAPlayerAddresse.lngBrassKnucklesAdr) = 0 Then
+            SetMemLong GTASAPlayerAddresse.lngBrassKnucklesAdr, 1
+            SetMemLong GTASAPlayerAddresse.lngBrassKnucklesAdr + 12, 1
+        End If
+    End If
+    For iStatCtr = 0 To 10
+        If isFixWeaponSlots(iStatCtr) Then
+            'get current weapon at this slot:
+            ReadProcessMemory lngPHandle, GTASAPlayerAddresse.lngWeaponsAdr(iStatCtr), HookPlayerWeapon, 16&, 0&
+            'compare this against iFixWeaponID and iFixWeaponAmmo:
+            If isInjected And (HookPlayerWeapon.lngWeaponID <> iFixWeaponID(iStatCtr)) And iFixWeaponID(iStatCtr) > 0 Then
+                'if code is injected, and player has currently another weapon in this slot, initialise this new weapon
+                WriteProcessMemory lngPHandle, GTASABaseAdr.WeaponSpawnAdr(iStatCtr), WeaponIDtoDatID(iFixWeaponID(iStatCtr)), 4&, 4&
+            End If
+            If ((HookPlayerWeapon.lngWeaponID <> iFixWeaponID(iStatCtr)) Or _
+                (HookPlayerWeapon.lngTotalAmmo = iFixWeaponAmmo(iStatCtr))) Then
+                HookPlayerWeapon.lngWeaponID = iFixWeaponID(iStatCtr)
+                HookPlayerWeapon.lngTotalAmmo = iFixWeaponAmmo(iStatCtr)
+                WriteProcessMemory lngPHandle, GTASAPlayerAddresse.lngWeaponsAdr(iStatCtr), HookPlayerWeapon, 16&, 16&
+            End If
+        End If
+    Next iStatCtr
+    strOnScreenText = ""
+    'special case for Warp to next/previous location:
+    If intWarpNextHitDelayCount > 0 Then intWarpNextHitDelayCount = intWarpNextHitDelayCount - 1
+    If intGameTimeChangeCount > 0 Then intGameTimeChangeCount = intGameTimeChangeCount - 1
+    'Listen to keyboard:
+    intShorcutCount = GTASAShortcuts.ShortcutCount
+    For intConsoleCounter = 1 To intShorcutCount
+        With GTASAShortcuts(intConsoleCounter)
+            If .isActive Then
+                If .iExtKeyCode > 0 Then
+                    If GetAsyncKeyState(.iExtKeyCode) < 0 Then
+                        'ExtKey Pressed
+                        If GetAsyncKeyState(.iKeyCode) < 0 Then
+                            'All needed Keys are pressed, execute command:
+                            Select Case .iCategory
+                                Case 0 'Commands
+                                    ExecuteConsoleCommand .sCommand, .sData
+                                Case 1 'Cheats
+                                    SendCheatCode GTASACheats.GetItemByUID(.sCommand).sCheatString
+                                    If isSafeCheats Then
+                                        SetMemLong GTASABaseAdr.CheatCountAdr, 0&
+                                        SetMemLong GTASABaseAdr.CheatStatAdr, 0&
+                                    End If
+                                Case 2 'WarpLocs
+                                    PasteWarpLoc 0, GTASAWarpLocs.GetItemByUID(.sCommand).sLocData
+                            End Select
+                        End If
+                    End If
+                Else
+                    If Not ((GetAsyncKeyState(vbKeyControl) < 0) Or (GetAsyncKeyState(vbKeyMenu) < 0)) Then
+                        'No ExtKeys Pressed
+                        If GetAsyncKeyState(.iKeyCode) < 0 Then
+                            'All needed Keys are pressed, execute command:
+                            Select Case .iCategory
+                                Case 0 'Commands
+                                    ExecuteConsoleCommand .sCommand, .sData
+                                Case 1 'Cheats
+                                    SendCheatCode GTASACheats.GetItemByUID(.sCommand).sCheatString
+                                    If isSafeCheats Then
+                                        SetMemLong GTASABaseAdr.CheatCountAdr, 0&
+                                        SetMemLong GTASABaseAdr.CheatStatAdr, 0&
+                                    End If
+                                Case 2 'WarpLocs
+                                    PasteWarpLoc 0, GTASAWarpLocs.GetItemByUID(.sCommand).sLocData
+                            End Select
+                        End If
+                    End If
+                End If
+            End If
+        End With
+CheckNextShortcut:
+    Next intConsoleCounter
+    If isHasFeedback Then
+        If Len(strOnScreenText) > 2 Then '"; "
+            strOnScreenText = Mid$(strOnScreenText, 3) & "."
+            OnScreenText strOnScreenText
+            strOnScreenText = ""
+        End If
+    End If
+    If isFlightAssistance And isHasCar Then
+        If intSpinSeconds > 0 Then
+            intSpinSeconds = intSpinSeconds - 1
+        ElseIf intSpinSeconds = 0 Then
+            'Just for once, Stop Spin:
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarSpinAdr, zeroSpin, 12&, 12&
+            'Level Z Grad:
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 8, 0&, 4&, 4&
+            'Level Z Looking:
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 24, 0&, 4&, 4&
+            'Level X/Y/Z Relational Positioning
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 32, 0&, 4&, 4&
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 36, 0&, 4&, 4&
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr + 40, 1&, 4&, 4&
+            intSpinSeconds = -1
+        End If
+        'Stop Flight Assistance for intFallSeconds:
+        If intFallSeconds > 0 Then
+            intFallSeconds = intFallSeconds - 1
+        ElseIf intFallSeconds = 0 Then
+            'Normalize and Set Speed always:
+            'Read Speed
+            ReadProcessMemory lngPHandle, tCurrCarAdr.lngCarSpeedAdr, speedConsoleBuffer, 12&, 0&
+            ReadProcessMemory lngPHandle, tCurrCarAdr.lngCarPosAdr, carFlipConsoleBuffer, 28&, 0&
+            'Normalize Speed:
+            speedConsoleBuffer.sngXSpeed = (Abs(speedConsoleBuffer.sngXSpeed) + Abs(speedConsoleBuffer.sngYSpeed)) * (carFlipConsoleBuffer.sngXlooking / (Abs(carFlipConsoleBuffer.sngXlooking) + Abs(carFlipConsoleBuffer.sngYlooking)))
+            speedConsoleBuffer.sngYSpeed = (Abs(speedConsoleBuffer.sngXSpeed) + Abs(speedConsoleBuffer.sngYSpeed)) * (carFlipConsoleBuffer.sngYlooking / (Abs(carFlipConsoleBuffer.sngXlooking) + Abs(carFlipConsoleBuffer.sngYlooking)))
+            If speedConsoleBuffer.sngZSpeed < 0 Then speedConsoleBuffer.sngZSpeed = 0.03 + sngAssistFlightBy
+            'Write speed:
+            WriteProcessMemory lngPHandle, tCurrCarAdr.lngCarSpeedAdr, speedConsoleBuffer, 12&, 12&
+            If tCurrTrailer.isUsable Then WriteProcessMemory lngPHandle, tCurrTrailer.lngCarSpeedAdr, speedConsoleBuffer, 12&, 12&
+        End If
+    End If
+    If isPedFlightAssistance Then
+        'Stop Flight Assistance for intFallSeconds:
+        If intFallSeconds > 0 Then
+            intFallSeconds = intFallSeconds - 1
+        ElseIf intFallSeconds = 0 Then
+            'Normalize and Set Speed always:
+            'Read Speed
+            ReadProcessMemory lngPHandle, GTASAPlayerAddresse.lngPedSpeedAdr, speedConsoleBuffer, 12&, 0&
+            'Normalize Speed:
+            If speedConsoleBuffer.sngZSpeed < 0 Then speedConsoleBuffer.sngZSpeed = 0.03 + sngPedAssistFlightBy
+            'Write speed:
+            WriteProcessMemory lngPHandle, GTASAPlayerAddresse.lngPedSpeedAdr, speedConsoleBuffer, 12&, 12&
+        End If
+    End If
+    'Lock Car properties:
+    CheckPlayerCarStatus
+    If isHasCar Or isHadCar Then
+        'Lock Engine Damage:
+        If isLockEngineHealth Then
+            SetMemFloat tCurrCarAdr.lngCarDamageAdr, sngLockEngineHealthTo
+            If tCurrTrailer.isUsable Then SetMemFloat tCurrTrailer.lngCarDamageAdr, sngLockEngineHealthTo
+        End If
+        If isDontBurn Or isDontExplode Then
+            fCarHealth = 0
+            lngReadReturn = ReadProcessMemory(lngPHandle, tCurrCarAdr.lngCarDamageAdr, fCarHealth, 4&, 0&)
+            If lngReadReturn <> 0 Then
+                If fCarHealth < 500 Then
+                    If isDontBurn Then
+                        SetMemFloat tCurrCarAdr.lngCarDamageAdr, 1000
+                    ElseIf isDontExplode And (fCarHealth < 250) Then
+                        SetMemFloat tCurrCarAdr.lngBurnTimerAdr, 0
+                    End If
+                End If
+            End If
+            If tCurrTrailer.isUsable Then
+                fCarHealth = 0
+                lngReadReturn = ReadProcessMemory(lngPHandle, tCurrTrailer.lngCarDamageAdr, fCarHealth, 4&, 0&)
+                If lngReadReturn <> 0 Then
+                    If fCarHealth < 500 Then
+                        If isDontBurn Then
+                            SetMemFloat tCurrTrailer.lngCarDamageAdr, 1000
+                        ElseIf isDontExplode And (fCarHealth < 250) Then
+                            SetMemFloat tCurrTrailer.lngBurnTimerAdr, 0
+                        End If
+                    End If
+                End If
+            End If
+        End If
+        If isPreventWheelDamage Then
+            If LCase(strCarType) = "bike" Then
+                SetMemInt tCurrCarAdr.lngBikeWheelAdr, 0
+            Else
+                SetMemByte tCurrCarAdr.lngCarWheelAdr, 0
+                SetMemByte tCurrCarAdr.lngCarWheelAdr + 1, 0
+                If tCurrTrailer.isUsable Then
+                    SetMemByte tCurrTrailer.lngCarWheelAdr, 0
+                    SetMemByte tCurrTrailer.lngCarWheelAdr + 1, 0
+                End If
+            End If
+        End If
+    End If
+Exit Sub
+errtmrConsole_Timer:
+    If isGTASAiconic Then
+        MsgBox Err.Description, , "Console Timer"
+    End If
+    Err.Clear
+End Sub
+Private Function FillInCombos() As Boolean '
+On Error GoTo errFillInCombos
+    FillInCombos = False
+    'Shortcut Combo:
+    cboShortcut.Clear
+    cboShortcut.AddItem "(None)"
+    'Special Keys:
+    cboShortcut.AddItem "SHIFT "
+    cboShortcut.AddItem "INSERT"
+    cboShortcut.AddItem "DELETE"
+    cboShortcut.AddItem "HOME "
+    cboShortcut.AddItem "END"
+    cboShortcut.AddItem "PgUP"
+    cboShortcut.AddItem "PgDOWN"
+    For intCounter = 0 To 9
+        cboShortcut.AddItem "NUM " & intCounter
+    Next intCounter
+    cboShortcut.AddItem "NUM COMMA"
+    cboShortcut.AddItem "ENTER"
+    cboShortcut.AddItem "NUM +"
+    cboShortcut.AddItem "NUM - "
+    cboShortcut.AddItem "NUM *"
+    cboShortcut.AddItem "NUM /"
+    cboShortcut.AddItem "F2"
+    cboShortcut.AddItem "F4"
+    'F5 to F12
+    For intCounter = 5 To 12
+        cboShortcut.AddItem "F" & intCounter
+    Next intCounter
+    '0 to 9
+    For intCounter = 0 To 9
+        cboShortcut.AddItem Format$(intCounter)
+    Next intCounter
+    'A to Z
+    For intCounter = 65 To 90
+        cboShortcut.AddItem Chr(intCounter)
+    Next intCounter
+
+    FillInCombos = True
+Exit Function
+errFillInCombos:
+    MsgBox Err.Description, vbCritical, "Internal error in FillInCombo's"
+    Err.Clear
+End Function
+
+Private Function ParseIniValues() As Boolean '
+On Error GoTo errParseIniValues
+    Dim intParseBuffer As Integer
+    Dim sngParseBuffer As Single
+    Dim isMsgBoxShown As Boolean
+    isMsgBoxShown = False
+    ParseIniValues = False
+    isInternalClick = True
+    
+    strBuffer = Space(50) 'Info Msg
+    GetPrivateProfileString "Main", "InfoMsg", "0", strBuffer, 50, strIniFileName
+    iMsgShowCtr = CInt(TrimChr0(strBuffer))
+    isMsgShown = (iMsgShowCtr < 1)
+    strBuffer = Space(5) 'Interval
+    GetPrivateProfileString "Main", "Interval", "100", strBuffer, 5, strIniFileName
+    tmrConsole.Interval = CInt("0" & TrimChr0(strBuffer))
+    If tmrConsole.Interval = 0 Then tmrConsole.Interval = 10
+    scrIntervall.Value = tmrConsole.Interval
+    lblIntervall.Caption = "Keyboard Control Intervall: (" & tmrConsole.Interval & " ms)."
+    strBuffer = Space(2) 'Feedback
+    GetPrivateProfileString "Main", "Feedback", "1", strBuffer, 2, strIniFileName
+    chkFeedback.Value = CInt(TrimChr0(strBuffer))
+    isHasFeedback = (chkFeedback.Value = 1)
+    strBuffer = Space(2) 'SCM Modded
+    GetPrivateProfileString "Main", "OrgSCM", "1", strBuffer, 2, strIniFileName
+    chkOrgSCM.Value = CInt(TrimChr0(strBuffer))
+    isOrgSCM = (chkOrgSCM.Value = 1)
+    For intParseBuffer = 0 To 5
+        oGFStats(intParseBuffer).Enabled = isOrgSCM
+    Next intParseBuffer
+    For intCounter = 0 To 21
+        strBuffer = Space(4) 'Injectable cheats 22 pieces
+        GetPrivateProfileString "Main", oCheatStates(intCounter).Tag, "0,0", strBuffer, 4, strIniFileName
+        oCheatStates(intCounter).CheatLock = CInt(GetToken(strBuffer, 1))
+        If oCheatStates(intCounter).CheatLock = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oCheatStates(intCounter).CheatState = CInt(GetToken(strBuffer, 2))
+    Next intCounter
+    strBuffer = Space(10) 'GTASAVersion
+    GetPrivateProfileString "Main", "GTASAVersion", "v1.0", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    Select Case strBuffer
+        Case "v1.0"
+            cboGTAVersion.ListIndex = 0
+        Case "v1.1"
+            cboGTAVersion.ListIndex = 1
+    End Select
+    strBuffer = Space(10) 'Weather
+    GetPrivateProfileString "Main", "Weather", "0,17", strBuffer, 10, strIniFileName
+    chkWeatherLock.Value = GetToken(strBuffer, 1)
+    If chkWeatherLock.Value = vbChecked Then
+        cboWeather.ListIndex = GetToken(strBuffer, 2)
+        isWeatherLock = True
+        lngLockWeatherTo = cboWeather.ListIndex
+        If lngLockWeatherTo < 0 Then lngLockWeatherTo = 1
+    End If
+    For intCounter = 1 To 10
+        strBuffer = Space(255)
+        GetPrivateProfileString "PlayerTracking", "MarkupLoc" & intCounter, "", strBuffer, 255, strIniFileName
+        strBuffer = TrimChr0(strBuffer)
+        strMarkLocations(intCounter) = strBuffer
+    Next intCounter
+    strBuffer = Space(10) 'Armor Level
+    GetPrivateProfileString "PlayerTracking", "FixArmor", "0,400", strBuffer, 10, strIniFileName
+    oPedStats(0).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(0).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(0).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockArmor = (oPedStats(0).Locked = 1)
+    sngLockArmorTo = oPedStats(0).ScrollVal
+    strBuffer = Space(10) 'Health Level
+    GetPrivateProfileString "PlayerTracking", "FixHealth", "0,400", strBuffer, 10, strIniFileName
+    oPedStats(1).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(1).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(1).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockHealth = (oPedStats(1).Locked = 1)
+    sngLockHealthTo = oPedStats(1).ScrollVal
+    strBuffer = Space(20) 'Fat Level
+    GetPrivateProfileString "PlayerTracking", "FixFat", "0,0", strBuffer, 20, strIniFileName
+    oPedStats(2).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(2).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(2).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockFat = (oPedStats(2).Locked = 1)
+    sngLockFatTo = oPedStats(2).ScrollVal
+    strBuffer = Space(20) 'Stamina Level
+    GetPrivateProfileString "PlayerTracking", "FixStamina", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(3).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(3).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(3).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockStamina = (oPedStats(3).Locked = 1)
+    sngLockStaminaTo = oPedStats(3).ScrollVal
+    strBuffer = Space(20) 'Muscle Level
+    GetPrivateProfileString "PlayerTracking", "FixMuscle", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(4).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(4).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(4).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockMuscle = (oPedStats(4).Locked = 1)
+    sngLockMuscleTo = oPedStats(4).ScrollVal
+    strBuffer = Space(20) 'Lung Capacity
+    GetPrivateProfileString "PlayerTracking", "FixLungStat", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(5).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(5).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(5).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockLungStat = (oPedStats(5).Locked = 1)
+    lngLockLungStatTo = oPedStats(5).ScrollVal
+    strBuffer = Space(20) 'Gambling Stat
+    GetPrivateProfileString "PlayerTracking", "FixGamblingStat", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(6).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(6).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(6).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockGamblingStat = (oPedStats(6).Locked = 1)
+    sngLockGamblingStatTo = oPedStats(6).ScrollVal
+    strBuffer = Space(20) 'Driving Stat
+    GetPrivateProfileString "PlayerTracking", "FixDrivingProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(7).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(7).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(7).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockDrivingProf = (oPedStats(7).Locked = 1)
+    lngLockDrivingProfTo = oPedStats(7).ScrollVal
+    strBuffer = Space(20) 'Biking Stat
+    GetPrivateProfileString "PlayerTracking", "FixBikingProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(8).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(8).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(8).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockBikingProf = (oPedStats(8).Locked = 1)
+    lngLockBikingProfTo = oPedStats(8).ScrollVal
+    strBuffer = Space(20) 'Cycling Stat
+    GetPrivateProfileString "PlayerTracking", "FixCyclingProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(9).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(9).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(9).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockCyclingProf = (oPedStats(9).Locked = 1)
+    lngLockCyclingProfTo = oPedStats(9).ScrollVal
+    strBuffer = Space(20) 'Pilot Stat
+    GetPrivateProfileString "PlayerTracking", "FixPilotProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(10).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(10).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(10).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockPilotProf = (oPedStats(10).Locked = 1)
+    lngLockPilotProfTo = oPedStats(10).ScrollVal
+    strBuffer = Space(10) 'FlightAssist
+    GetPrivateProfileString "PlayerTracking", "PedFlightAssist", "0,2", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    oPedStats(20).Locked = CInt(GetToken(strBuffer, 1))
+    oPedStats(20).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isPedFlightAssistance = (oPedStats(20).Locked = 1)
+    sngPedAssistFlightBy = CSng(oPedStats(20).ScrollVal) * 0.002
+    strBuffer = Space(10) 'Set Ped Specs
+    GetPrivateProfileString "PlayerTracking", "FixPed", "0,0,0,0,0", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkFixPedSpecs.Value = CInt(GetToken(strBuffer, 1))
+    isFixPed = (chkFixPedSpecs.Value = 1)
+    For intCounter = 0 To 3
+        chkPedSpecs(intCounter).Value = CInt(GetToken(strBuffer, intCounter + 2))
+    Next intCounter
+    'Player Weapon and Ammo Values:
+    strBuffer = Space(2) 'Brass Knuckle locked or not
+    GetPrivateProfileString "PlayerTracking", "WeaponBr", "0", strBuffer, 2, strIniFileName
+    chkWeapons(11).Value = IIf(Left$(strBuffer, 1) = "1", vbChecked, vbUnchecked)
+    isFixBrassKnuckle = (chkWeapons(11).Value = vbChecked)
+    For intCounter = 0 To 10
+        strBuffer = Space(100) 'Weapons
+        GetPrivateProfileString "PlayerTracking", "Weapon" & Format$(intCounter, "00"), "0,0,0", strBuffer, 100, strIniFileName
+        chkWeapons(intCounter).Value = CInt(GetToken(strBuffer, 1))
+        If chkWeapons(intCounter).Value = vbChecked Then
+            isFixWeaponSlots(intCounter) = True
+            iFixWeaponID(intCounter) = CLng(GetToken(strBuffer, 2))
+            iFixWeaponAmmo(intCounter) = CLng(GetToken(strBuffer, 3))
+            cboWeapons(intCounter).ListIndex = WeaponSlotCombo(iFixWeaponID(intCounter), 1)
+            txtAmmo(intCounter).Text = iFixWeaponAmmo(intCounter)
+        Else
+            cboWeapons(intCounter).ListIndex = 0
+        End If
+    Next intCounter
+    strBuffer = Space(2) 'Safe Cheats
+    GetPrivateProfileString "Main", "SafeCheats", "1", strBuffer, 2, strIniFileName
+    chkSafeCheats.Value = CInt(TrimChr0(strBuffer))
+    isSafeCheats = (chkSafeCheats.Value = 1)
+    'Girlfriends:
+    For intCounter = 0 To 5
+        strBuffer = Space(20)
+        GetPrivateProfileString "PlayerTracking", oGFStats(intCounter).Tag, "0,100", strBuffer, 20, strIniFileName
+        oGFStats(intCounter).Locked = CInt(GetToken(strBuffer, 1))
+        If oGFStats(intCounter).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oGFStats(intCounter).ScrollVal = CInt(GetToken(strBuffer, 2))
+        isLockGF(intCounter) = (oGFStats(intCounter).Locked = 1)
+        lngLockGFto(intCounter) = oGFStats(intCounter).ScrollVal
+    Next intCounter
+    'CarTracking:
+    strBuffer = Space(10) 'Set Car Specs
+    GetPrivateProfileString "CarTracking", "SetCarSpecs", "0,0,0,0,0", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(0).Value = CInt("0" & GetToken(strBuffer, 1))
+    For intCounter = 0 To 3
+        chkCarSpecs(intCounter).Value = CInt("0" & GetToken(strBuffer, intCounter + 2))
+    Next intCounter
+    strBuffer = Space(4) 'CarDoors
+    GetPrivateProfileString "CarTracking", "CarDoors", "0,0", strBuffer, 4, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(1).Value = CInt("0" & GetToken(strBuffer, 1))
+    optCarDoors(0).Value = CInt("0" & GetToken(strBuffer, 2))
+    optCarDoors(1).Value = Not optCarDoors(0).Value
+    isAutoLockCarDoors = (chkCarDynamics(1).Value = 1) And optCarDoors(1).Value
+    strBuffer = Space(10) 'EngineDamage
+    GetPrivateProfileString "CarTracking", "EngineHealth", "0,1000", strBuffer, 10, strIniFileName
+    chkCarDynamics(3).Value = GetToken(strBuffer, 1)
+    If chkCarDynamics(3).Value = 1 Then
+        intParseBuffer = GetToken(strBuffer, 2)
+        If intParseBuffer < 0 Then intParseBuffer = 0
+        If intParseBuffer > 1000 Then intParseBuffer = 1000
+        scrCarDynamics(0).Value = intParseBuffer
+        chkCarDynamics(3).Caption = "Engine health (" & intParseBuffer \ 10 & "%):"
+    End If
+    isLockEngineHealth = (chkCarDynamics(3).Value = 1)
+    sngLockEngineHealthTo = scrCarDynamics(0).Value
+    strBuffer = Space(10) 'CarWeight
+    GetPrivateProfileString "CarTracking", "CarWeight", "0,500", strBuffer, 10, strIniFileName
+    chkCarDynamics(4).Value = GetToken(strBuffer, 1)
+    If chkCarDynamics(4).Value = 1 Then
+        intParseBuffer = GetToken(strBuffer, 2)
+        scrCarDynamics(1).Value = intParseBuffer
+        chkCarDynamics(4).Caption = "Car Weight: (" & Format$(intParseBuffer / 10, "0.0") & " Tons)"
+    End If
+    strBuffer = Space(14) 'PaintCar
+    GetPrivateProfileString "CarTracking", "PaintCar", "0,1,0,1,0", strBuffer, 14, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(5).Value = CInt("0" & GetToken(strBuffer, 1))
+    picMajor.BackColor = GTASAColors(CInt("0" & GetToken(strBuffer, 2))).lngRGB
+    picMajor.Tag = CInt("0" & GetToken(strBuffer, 2))
+    chkMajorLock.Value = CInt("0" & GetToken(strBuffer, 3))
+    picMinor.BackColor = GTASAColors(CInt("0" & GetToken(strBuffer, 4))).lngRGB
+    picMinor.Tag = CInt("0" & GetToken(strBuffer, 4))
+    chkMinorLock.Value = CInt("0" & GetToken(strBuffer, 5))
+    strBuffer = Space(2) 'CarAlarm
+    GetPrivateProfileString "CarTracking", "CarAlarm", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(6).Value = CInt("0" & TrimChr0(strBuffer))
+    strBuffer = Space(2) 'PreventWheelDamage
+    GetPrivateProfileString "CarTracking", "WheelDamage", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(2).Value = CInt("0" & TrimChr0(strBuffer))
+    isPreventWheelDamage = (chkCarDynamics(2).Value = 1)
+    strBuffer = Space(2) 'RCCars
+    GetPrivateProfileString "CarTracking", "RCCars", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(9).Value = IIf(Left$(strBuffer, 1) = "1", vbChecked, vbUnchecked)
+    isControlRCCars = (chkCarDynamics(9).Value = 1)
+    strBuffer = Space(10) 'FlightAssist
+    GetPrivateProfileString "CarTracking", "FlightAssist", "0,2", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(8).Value = CInt(GetToken(strBuffer, 1))
+    scrCarDynamics(8).Value = CInt(GetToken(strBuffer, 2))
+    chkCarDynamics(8).Caption = "Flight Assistance (" & scrCarDynamics(8).Value / 10 & "%)"
+    isFlightAssistance = (chkCarDynamics(8).Value = 1)
+    sngAssistFlightBy = CSng(scrCarDynamics(8).Value) * 0.002
+    strBuffer = Space(4) 'DontBurn
+    GetPrivateProfileString "CarTracking", "DontBurn", "0,0", strBuffer, 4, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkDontBurn(0).Value = CInt("0" & GetToken(strBuffer, 1))
+    chkDontBurn(1).Value = CInt("0" & GetToken(strBuffer, 2))
+    isDontExplode = (chkDontBurn(1).Value = 1)
+    isDontBurn = (chkDontBurn(0).Value = 1)
+    strBuffer = Space(2) 'RestartCar if stalled
+    GetPrivateProfileString "CarTracking", "RestartCar", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(7).Value = CInt("0" & TrimChr0(strBuffer))
+    isRestartCar = (chkCarDynamics(7).Value = 1)
+    strBuffer = Space(2) 'Auto-Inject Code if possible
+    GetPrivateProfileString "CarTracking", "AutoInject", "0", strBuffer, 2, strIniFileName
+    chkAutoInjectCode.Value = CInt("0" & TrimChr0(strBuffer))
+    isAutoInject = (chkAutoInjectCode.Value = 1)
+    strBuffer = Space(2) 'Inject Code Msg Counter
+    GetPrivateProfileString "CarTracking", "InjectMsg", "0", strBuffer, 2, strIniFileName
+    iInjectMsgCtr = CInt("0" & TrimChr0(strBuffer))
+    strBuffer = Space(11) '"1,GTASA CC"
+    GetPrivateProfileString "CarTracking", "LicensePlate", "0,GTASA CC", strBuffer, 11, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(10).Value = CInt(GetToken(strBuffer, 1))
+    txtLicensePlate.Text = GetToken(strBuffer, 2)
+    txtLicensePlate.Text = UCase(txtLicensePlate.Text)
+    If Trim(txtLicensePlate.Text) = "" Then txtLicensePlate.Text = "GTASA CC"
+    If Len(txtLicensePlate.Text) < 8 Then txtLicensePlate.Text = Left$(txtLicensePlate.Text & "        ", 8)
+    sLicensePlate = txtLicensePlate.Text
+    isFixLicensePlate = (chkCarDynamics(10).Value = vbChecked)
+    'garages
+    For intCounter = 0 To 67
+        strBuffer = Space(255)
+        GetPrivateProfileString "CarTracking", "Garage" & intCounter, "0,1,1,1,1,1,1,1", strBuffer, 255, strIniFileName
+        strBuffer = TrimChr0(strBuffer)
+        cParking(intCounter \ 4).SetIniVals (intCounter Mod 4), strBuffer
+    Next intCounter
+    isInternalClick = False
+    ParseIniValues = True
+Exit Function
+errParseIniValues:
+    If isMsgBoxShown Then
+        Err.Clear
+        Resume Next
+    Else
+        MsgBox "Initialisation Failed." & vbCrLf & "Don't mess with ini file."
+        isMsgBoxShown = True
+        Err.Clear
+        Resume Next
+    End If
+End Function
+Private Sub FillInCombos() '
+On Error GoTo errFillInCombos
+    FillInCombos = False
+    'Shortcut Combo:
+    cboShortcut.Clear
+    cboShortcut.AddItem "(None)"
+    'Special Keys:
+    cboShortcut.AddItem "SHIFT "
+    cboShortcut.AddItem "INSERT"
+    cboShortcut.AddItem "DELETE"
+    cboShortcut.AddItem "HOME "
+    cboShortcut.AddItem "END"
+    cboShortcut.AddItem "PgUP"
+    cboShortcut.AddItem "PgDOWN"
+    For intCounter = 0 To 9
+        cboShortcut.AddItem "NUM " & intCounter
+    Next intCounter
+    cboShortcut.AddItem "NUM COMMA"
+    cboShortcut.AddItem "ENTER"
+    cboShortcut.AddItem "NUM +"
+    cboShortcut.AddItem "NUM - "
+    cboShortcut.AddItem "NUM *"
+    cboShortcut.AddItem "NUM /"
+    cboShortcut.AddItem "F2"
+    cboShortcut.AddItem "F4"
+    'F5 to F12
+    For intCounter = 5 To 12
+        cboShortcut.AddItem "F" & intCounter
+    Next intCounter
+    '0 to 9
+    For intCounter = 0 To 9
+        cboShortcut.AddItem Format$(intCounter)
+    Next intCounter
+    'A to Z
+    For intCounter = 65 To 90
+        cboShortcut.AddItem Chr(intCounter)
+    Next intCounter
+
+    FillInCombos = True
+Exit Function
+errFillInCombos:
+    MsgBox Err.Description, vbCritical, "Internal error in FillInCombo's"
+    Err.Clear
+End Function
+
+Private Function ParseIniValues() As Boolean '
+On Error GoTo errParseIniValues
+    Dim intParseBuffer As Integer
+    Dim sngParseBuffer As Single
+    Dim isMsgBoxShown As Boolean
+    isMsgBoxShown = False
+    ParseIniValues = False
+    isInternalClick = True
+    
+    strBuffer = Space(50) 'Info Msg
+    GetPrivateProfileString "Main", "InfoMsg", "0", strBuffer, 50, strIniFileName
+    iMsgShowCtr = CInt(TrimChr0(strBuffer))
+    isMsgShown = (iMsgShowCtr < 1)
+    strBuffer = Space(5) 'Interval
+    GetPrivateProfileString "Main", "Interval", "100", strBuffer, 5, strIniFileName
+    tmrConsole.Interval = CInt("0" & TrimChr0(strBuffer))
+    If tmrConsole.Interval = 0 Then tmrConsole.Interval = 10
+    scrIntervall.Value = tmrConsole.Interval
+    lblIntervall.Caption = "Keyboard Control Intervall: (" & tmrConsole.Interval & " ms)."
+    strBuffer = Space(2) 'Feedback
+    GetPrivateProfileString "Main", "Feedback", "1", strBuffer, 2, strIniFileName
+    chkFeedback.Value = CInt(TrimChr0(strBuffer))
+    isHasFeedback = (chkFeedback.Value = 1)
+    strBuffer = Space(2) 'SCM Modded
+    GetPrivateProfileString "Main", "OrgSCM", "1", strBuffer, 2, strIniFileName
+    chkOrgSCM.Value = CInt(TrimChr0(strBuffer))
+    isOrgSCM = (chkOrgSCM.Value = 1)
+    For intParseBuffer = 0 To 5
+        oGFStats(intParseBuffer).Enabled = isOrgSCM
+    Next intParseBuffer
+    For intCounter = 0 To 21
+        strBuffer = Space(4) 'Injectable cheats 22 pieces
+        GetPrivateProfileString "Main", oCheatStates(intCounter).Tag, "0,0", strBuffer, 4, strIniFileName
+        oCheatStates(intCounter).CheatLock = CInt(GetToken(strBuffer, 1))
+        If oCheatStates(intCounter).CheatLock = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oCheatStates(intCounter).CheatState = CInt(GetToken(strBuffer, 2))
+    Next intCounter
+    strBuffer = Space(10) 'GTASAVersion
+    GetPrivateProfileString "Main", "GTASAVersion", "v1.0", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    Select Case strBuffer
+        Case "v1.0"
+            cboGTAVersion.ListIndex = 0
+        Case "v1.1"
+            cboGTAVersion.ListIndex = 1
+    End Select
+    strBuffer = Space(10) 'Weather
+    GetPrivateProfileString "Main", "Weather", "0,17", strBuffer, 10, strIniFileName
+    chkWeatherLock.Value = GetToken(strBuffer, 1)
+    If chkWeatherLock.Value = vbChecked Then
+        cboWeather.ListIndex = GetToken(strBuffer, 2)
+        isWeatherLock = True
+        lngLockWeatherTo = cboWeather.ListIndex
+        If lngLockWeatherTo < 0 Then lngLockWeatherTo = 1
+    End If
+    For intCounter = 1 To 10
+        strBuffer = Space(255)
+        GetPrivateProfileString "PlayerTracking", "MarkupLoc" & intCounter, "", strBuffer, 255, strIniFileName
+        strBuffer = TrimChr0(strBuffer)
+        strMarkLocations(intCounter) = strBuffer
+    Next intCounter
+    strBuffer = Space(10) 'Armor Level
+    GetPrivateProfileString "PlayerTracking", "FixArmor", "0,400", strBuffer, 10, strIniFileName
+    oPedStats(0).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(0).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(0).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockArmor = (oPedStats(0).Locked = 1)
+    sngLockArmorTo = oPedStats(0).ScrollVal
+    strBuffer = Space(10) 'Health Level
+    GetPrivateProfileString "PlayerTracking", "FixHealth", "0,400", strBuffer, 10, strIniFileName
+    oPedStats(1).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(1).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(1).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockHealth = (oPedStats(1).Locked = 1)
+    sngLockHealthTo = oPedStats(1).ScrollVal
+    strBuffer = Space(20) 'Fat Level
+    GetPrivateProfileString "PlayerTracking", "FixFat", "0,0", strBuffer, 20, strIniFileName
+    oPedStats(2).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(2).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(2).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockFat = (oPedStats(2).Locked = 1)
+    sngLockFatTo = oPedStats(2).ScrollVal
+    strBuffer = Space(20) 'Stamina Level
+    GetPrivateProfileString "PlayerTracking", "FixStamina", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(3).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(3).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(3).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockStamina = (oPedStats(3).Locked = 1)
+    sngLockStaminaTo = oPedStats(3).ScrollVal
+    strBuffer = Space(20) 'Muscle Level
+    GetPrivateProfileString "PlayerTracking", "FixMuscle", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(4).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(4).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(4).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockMuscle = (oPedStats(4).Locked = 1)
+    sngLockMuscleTo = oPedStats(4).ScrollVal
+    strBuffer = Space(20) 'Lung Capacity
+    GetPrivateProfileString "PlayerTracking", "FixLungStat", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(5).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(5).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(5).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockLungStat = (oPedStats(5).Locked = 1)
+    lngLockLungStatTo = oPedStats(5).ScrollVal
+    strBuffer = Space(20) 'Gambling Stat
+    GetPrivateProfileString "PlayerTracking", "FixGamblingStat", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(6).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(6).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(6).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockGamblingStat = (oPedStats(6).Locked = 1)
+    sngLockGamblingStatTo = oPedStats(6).ScrollVal
+    strBuffer = Space(20) 'Driving Stat
+    GetPrivateProfileString "PlayerTracking", "FixDrivingProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(7).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(7).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(7).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockDrivingProf = (oPedStats(7).Locked = 1)
+    lngLockDrivingProfTo = oPedStats(7).ScrollVal
+    strBuffer = Space(20) 'Biking Stat
+    GetPrivateProfileString "PlayerTracking", "FixBikingProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(8).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(8).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(8).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockBikingProf = (oPedStats(8).Locked = 1)
+    lngLockBikingProfTo = oPedStats(8).ScrollVal
+    strBuffer = Space(20) 'Cycling Stat
+    GetPrivateProfileString "PlayerTracking", "FixCyclingProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(9).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(9).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(9).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockCyclingProf = (oPedStats(9).Locked = 1)
+    lngLockCyclingProfTo = oPedStats(9).ScrollVal
+    strBuffer = Space(20) 'Pilot Stat
+    GetPrivateProfileString "PlayerTracking", "FixPilotProf", "0,1000", strBuffer, 20, strIniFileName
+    oPedStats(10).Locked = CInt(GetToken(strBuffer, 1))
+    If oPedStats(10).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oPedStats(10).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isLockPilotProf = (oPedStats(10).Locked = 1)
+    lngLockPilotProfTo = oPedStats(10).ScrollVal
+    strBuffer = Space(10) 'FlightAssist
+    GetPrivateProfileString "PlayerTracking", "PedFlightAssist", "0,2", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    oPedStats(20).Locked = CInt(GetToken(strBuffer, 1))
+    oPedStats(20).ScrollVal = CInt(GetToken(strBuffer, 2))
+    isPedFlightAssistance = (oPedStats(20).Locked = 1)
+    sngPedAssistFlightBy = CSng(oPedStats(20).ScrollVal) * 0.002
+    strBuffer = Space(10) 'Set Ped Specs
+    GetPrivateProfileString "PlayerTracking", "FixPed", "0,0,0,0,0", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkFixPedSpecs.Value = CInt(GetToken(strBuffer, 1))
+    isFixPed = (chkFixPedSpecs.Value = 1)
+    For intCounter = 0 To 3
+        chkPedSpecs(intCounter).Value = CInt(GetToken(strBuffer, intCounter + 2))
+    Next intCounter
+    'Player Weapon and Ammo Values:
+    strBuffer = Space(2) 'Brass Knuckle locked or not
+    GetPrivateProfileString "PlayerTracking", "WeaponBr", "0", strBuffer, 2, strIniFileName
+    chkWeapons(11).Value = IIf(Left$(strBuffer, 1) = "1", vbChecked, vbUnchecked)
+    isFixBrassKnuckle = (chkWeapons(11).Value = vbChecked)
+    For intCounter = 0 To 10
+        strBuffer = Space(100) 'Weapons
+        GetPrivateProfileString "PlayerTracking", "Weapon" & Format$(intCounter, "00"), "0,0,0", strBuffer, 100, strIniFileName
+        chkWeapons(intCounter).Value = CInt(GetToken(strBuffer, 1))
+        If chkWeapons(intCounter).Value = vbChecked Then
+            isFixWeaponSlots(intCounter) = True
+            iFixWeaponID(intCounter) = CLng(GetToken(strBuffer, 2))
+            iFixWeaponAmmo(intCounter) = CLng(GetToken(strBuffer, 3))
+            cboWeapons(intCounter).ListIndex = WeaponSlotCombo(iFixWeaponID(intCounter), 1)
+            txtAmmo(intCounter).Text = iFixWeaponAmmo(intCounter)
+        Else
+            cboWeapons(intCounter).ListIndex = 0
+        End If
+    Next intCounter
+    strBuffer = Space(2) 'Safe Cheats
+    GetPrivateProfileString "Main", "SafeCheats", "1", strBuffer, 2, strIniFileName
+    chkSafeCheats.Value = CInt(TrimChr0(strBuffer))
+    isSafeCheats = (chkSafeCheats.Value = 1)
+    'Girlfriends:
+    For intCounter = 0 To 5
+        strBuffer = Space(20)
+        GetPrivateProfileString "PlayerTracking", oGFStats(intCounter).Tag, "0,100", strBuffer, 20, strIniFileName
+        oGFStats(intCounter).Locked = CInt(GetToken(strBuffer, 1))
+        If oGFStats(intCounter).Locked = 1 And CInt(GetToken(strBuffer, 2)) > 0 Then oGFStats(intCounter).ScrollVal = CInt(GetToken(strBuffer, 2))
+        isLockGF(intCounter) = (oGFStats(intCounter).Locked = 1)
+        lngLockGFto(intCounter) = oGFStats(intCounter).ScrollVal
+    Next intCounter
+    'CarTracking:
+    strBuffer = Space(10) 'Set Car Specs
+    GetPrivateProfileString "CarTracking", "SetCarSpecs", "0,0,0,0,0", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(0).Value = CInt("0" & GetToken(strBuffer, 1))
+    For intCounter = 0 To 3
+        chkCarSpecs(intCounter).Value = CInt("0" & GetToken(strBuffer, intCounter + 2))
+    Next intCounter
+    strBuffer = Space(4) 'CarDoors
+    GetPrivateProfileString "CarTracking", "CarDoors", "0,0", strBuffer, 4, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(1).Value = CInt("0" & GetToken(strBuffer, 1))
+    optCarDoors(0).Value = CInt("0" & GetToken(strBuffer, 2))
+    optCarDoors(1).Value = Not optCarDoors(0).Value
+    isAutoLockCarDoors = (chkCarDynamics(1).Value = 1) And optCarDoors(1).Value
+    strBuffer = Space(10) 'EngineDamage
+    GetPrivateProfileString "CarTracking", "EngineHealth", "0,1000", strBuffer, 10, strIniFileName
+    chkCarDynamics(3).Value = GetToken(strBuffer, 1)
+    If chkCarDynamics(3).Value = 1 Then
+        intParseBuffer = GetToken(strBuffer, 2)
+        If intParseBuffer < 0 Then intParseBuffer = 0
+        If intParseBuffer > 1000 Then intParseBuffer = 1000
+        scrCarDynamics(0).Value = intParseBuffer
+        chkCarDynamics(3).Caption = "Engine health (" & intParseBuffer \ 10 & "%):"
+    End If
+    isLockEngineHealth = (chkCarDynamics(3).Value = 1)
+    sngLockEngineHealthTo = scrCarDynamics(0).Value
+    strBuffer = Space(10) 'CarWeight
+    GetPrivateProfileString "CarTracking", "CarWeight", "0,500", strBuffer, 10, strIniFileName
+    chkCarDynamics(4).Value = GetToken(strBuffer, 1)
+    If chkCarDynamics(4).Value = 1 Then
+        intParseBuffer = GetToken(strBuffer, 2)
+        scrCarDynamics(1).Value = intParseBuffer
+        chkCarDynamics(4).Caption = "Car Weight: (" & Format$(intParseBuffer / 10, "0.0") & " Tons)"
+    End If
+    strBuffer = Space(14) 'PaintCar
+    GetPrivateProfileString "CarTracking", "PaintCar", "0,1,0,1,0", strBuffer, 14, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(5).Value = CInt("0" & GetToken(strBuffer, 1))
+    picMajor.BackColor = GTASAColors(CInt("0" & GetToken(strBuffer, 2))).lngRGB
+    picMajor.Tag = CInt("0" & GetToken(strBuffer, 2))
+    chkMajorLock.Value = CInt("0" & GetToken(strBuffer, 3))
+    picMinor.BackColor = GTASAColors(CInt("0" & GetToken(strBuffer, 4))).lngRGB
+    picMinor.Tag = CInt("0" & GetToken(strBuffer, 4))
+    chkMinorLock.Value = CInt("0" & GetToken(strBuffer, 5))
+    strBuffer = Space(2) 'CarAlarm
+    GetPrivateProfileString "CarTracking", "CarAlarm", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(6).Value = CInt("0" & TrimChr0(strBuffer))
+    strBuffer = Space(2) 'PreventWheelDamage
+    GetPrivateProfileString "CarTracking", "WheelDamage", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(2).Value = CInt("0" & TrimChr0(strBuffer))
+    isPreventWheelDamage = (chkCarDynamics(2).Value = 1)
+    strBuffer = Space(2) 'RCCars
+    GetPrivateProfileString "CarTracking", "RCCars", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(9).Value = IIf(Left$(strBuffer, 1) = "1", vbChecked, vbUnchecked)
+    isControlRCCars = (chkCarDynamics(9).Value = 1)
+    strBuffer = Space(10) 'FlightAssist
+    GetPrivateProfileString "CarTracking", "FlightAssist", "0,2", strBuffer, 10, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(8).Value = CInt(GetToken(strBuffer, 1))
+    scrCarDynamics(8).Value = CInt(GetToken(strBuffer, 2))
+    chkCarDynamics(8).Caption = "Flight Assistance (" & scrCarDynamics(8).Value / 10 & "%)"
+    isFlightAssistance = (chkCarDynamics(8).Value = 1)
+    sngAssistFlightBy = CSng(scrCarDynamics(8).Value) * 0.002
+    strBuffer = Space(4) 'DontBurn
+    GetPrivateProfileString "CarTracking", "DontBurn", "0,0", strBuffer, 4, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkDontBurn(0).Value = CInt("0" & GetToken(strBuffer, 1))
+    chkDontBurn(1).Value = CInt("0" & GetToken(strBuffer, 2))
+    isDontExplode = (chkDontBurn(1).Value = 1)
+    isDontBurn = (chkDontBurn(0).Value = 1)
+    strBuffer = Space(2) 'RestartCar if stalled
+    GetPrivateProfileString "CarTracking", "RestartCar", "0", strBuffer, 2, strIniFileName
+    chkCarDynamics(7).Value = CInt("0" & TrimChr0(strBuffer))
+    isRestartCar = (chkCarDynamics(7).Value = 1)
+    strBuffer = Space(2) 'Auto-Inject Code if possible
+    GetPrivateProfileString "CarTracking", "AutoInject", "0", strBuffer, 2, strIniFileName
+    chkAutoInjectCode.Value = CInt("0" & TrimChr0(strBuffer))
+    isAutoInject = (chkAutoInjectCode.Value = 1)
+    strBuffer = Space(2) 'Inject Code Msg Counter
+    GetPrivateProfileString "CarTracking", "InjectMsg", "0", strBuffer, 2, strIniFileName
+    iInjectMsgCtr = CInt("0" & TrimChr0(strBuffer))
+    strBuffer = Space(11) '"1,GTASA CC"
+    GetPrivateProfileString "CarTracking", "LicensePlate", "0,GTASA CC", strBuffer, 11, strIniFileName
+    strBuffer = TrimChr0(strBuffer)
+    chkCarDynamics(10).Value = CInt(GetToken(strBuffer, 1))
+    txtLicensePlate.Text = GetToken(strBuffer, 2)
+    txtLicensePlate.Text = UCase(txtLicensePlate.Text)
+    If Trim(txtLicensePlate.Text) = "" Then txtLicensePlate.Text = "GTASA CC"
+    If Len(txtLicensePlate.Text) < 8 Then txtLicensePlate.Text = Left$(txtLicensePlate.Text & "        ", 8)
+    sLicensePlate = txtLicensePlate.Text
+    isFixLicensePlate = (chkCarDynamics(10).Value = vbChecked)
+    'garages
+    For intCounter = 0 To 67
+        strBuffer = Space(255)
+        GetPrivateProfileString "CarTracking", "Garage" & intCounter, "0,1,1,1,1,1,1,1", strBuffer, 255, strIniFileName
+        strBuffer = TrimChr0(strBuffer)
+        cParking(intCounter \ 4).SetIniVals (intCounter Mod 4), strBuffer
+    Next intCounter
+    isInternalClick = False
+    ParseIniValues = True
+Exit Function
+errParseIniValues:
+    If isMsgBoxShown Then
+        Err.Clear
+        Resume Next
+    Else
+        MsgBox "Initialisation Failed." & vbCrLf & "Don't mess with ini file."
+        isMsgBoxShown = True
+        Err.Clear
+        Resume Next
+    End If
+End Function
